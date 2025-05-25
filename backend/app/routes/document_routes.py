@@ -36,7 +36,7 @@ async def upload_document(file: UploadFile = File(...)):
     # Initialize document status
     document_status[filename] = {
         "status": "processing",
-        "changes": [],
+        "analysis": None,
         "redline_path": None,
         "clean_path": None
     }
@@ -47,22 +47,22 @@ async def upload_document(file: UploadFile = File(...)):
         paragraphs, doc = document_service.parse_document(file_path)
         
         # Analyze document
-        changes = ai_service.analyze_nda(paragraphs)
+        analysis = ai_service.analyze_nda(paragraphs)
         
         # Create redline version
-        redline_doc = document_service.create_redline_document(doc, changes)
+        redline_doc = document_service.create_redline_document(doc, analysis["changes"])
         redline_path = os.path.join(document_service.upload_dir, f"redline_{filename}")
         document_service.save_document(redline_doc, redline_path)
         
         # Create clean version
-        clean_doc = document_service.create_clean_document(doc, changes)
+        clean_doc = document_service.create_clean_document(doc, analysis["changes"])
         clean_path = os.path.join(document_service.upload_dir, f"clean_{filename}")
         document_service.save_document(clean_doc, clean_path)
         
         # Update status
         document_status[filename].update({
             "status": "completed",
-            "changes": changes,
+            "analysis": analysis,
             "redline_path": redline_path,
             "clean_path": clean_path
         })
@@ -75,7 +75,7 @@ async def upload_document(file: UploadFile = File(...)):
     return {
         "filename": filename,
         "message": "Document uploaded and processed successfully",
-        "changes": changes
+        "analysis": analysis
     }
 
 @router.get("/status/{filename}")
@@ -108,4 +108,23 @@ async def download_document(filename: str, version: str = "redline"):
         path=file_path,
         filename=os.path.basename(file_path),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    ) 
+    )
+
+@router.get("/analysis/{filename}")
+async def get_document_analysis(filename: str):
+    """
+    Get the detailed analysis of a document
+    """
+    if filename not in document_status:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    status = document_status[filename]
+    if status["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Document processing not completed")
+    
+    return {
+        "analysis": status["analysis"],
+        "risk_level": status["analysis"]["overall_risk_level"],
+        "missing_clauses": status["analysis"]["missing_clauses"],
+        "clause_categories": status["analysis"]["clause_categories"]
+    } 
