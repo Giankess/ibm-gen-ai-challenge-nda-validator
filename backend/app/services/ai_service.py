@@ -77,18 +77,20 @@ class AIService:
         if not patterns:
             patterns = [
                 {
-                    "pattern": r"(?:perpetual|indefinite|forever|without\s+time\s+limit)",
+                    "pattern": r"\b(?:perpetual|indefinite|forever|without\s+time\s+limit)\b",
                     "description": "Perpetual confidentiality obligations",
                     "suggestion": "Consider adding a reasonable time limit for confidentiality obligations",
                     "risk_level": "high",
-                    "category": "duration"
+                    "category": "duration",
+                    "context_patterns": ["confidential", "secret", "proprietary"]
                 },
                 {
-                    "pattern": r"(?:all|any|every)\s+(?:information|data|material|document)",
+                    "pattern": r"\b(?:all|any|every)\s+(?:information|data|material|document)\b",
                     "description": "Overly broad confidentiality scope",
                     "suggestion": "Specify the types of information that are considered confidential",
                     "risk_level": "high",
-                    "category": "scope"
+                    "category": "scope",
+                    "context_patterns": ["confidential", "secret", "proprietary"]
                 }
             ]
         
@@ -171,26 +173,61 @@ class AIService:
         Check for problematic patterns in text
         """
         changes = []
+        paragraph_lower = paragraph.lower()
+        
         for pattern in self.problematic_patterns:
+            # First check if the context patterns are present
+            if pattern.get("context_patterns"):
+                context_match = any(
+                    context in paragraph_lower 
+                    for context in pattern["context_patterns"]
+                )
+                if not context_match:
+                    continue
+            
+            # Then look for the specific pattern
             matches = re.finditer(pattern["pattern"], paragraph, re.IGNORECASE)
             for match in matches:
-                # Check context if available
-                if pattern.get("context_patterns"):
-                    context_match = any(
-                        context in paragraph.lower() 
-                        for context in pattern["context_patterns"]
-                    )
-                    if not context_match:
+                # Get the matched text and its surrounding context
+                matched_text = match.group()
+                start_pos = max(0, match.start() - 100)  # Increased context window
+                end_pos = min(len(paragraph), match.end() + 100)
+                context = paragraph[start_pos:end_pos].lower()
+                
+                # Enhanced context validation
+                if pattern["category"] == "scope":
+                    # For scope patterns, ensure we're in a confidentiality context
+                    # and that the clause is actually defining scope (not just mentioning it)
+                    if not any(word in context for word in ["confidential", "secret", "proprietary"]):
+                        continue
+                    # Check if this is actually a scope definition clause
+                    if not any(phrase in context for phrase in ["shall include", "means", "refers to", "defined as"]):
+                        continue
+                elif pattern["category"] == "duration":
+                    # For duration patterns, ensure we're in a confidentiality context
+                    # and that the clause is actually about duration (not just mentioning time)
+                    if not any(word in context for word in ["confidential", "secret", "proprietary", "term", "period"]):
+                        continue
+                    # Check if this is actually a duration clause
+                    if not any(phrase in context for phrase in ["shall continue", "shall remain", "shall survive", "shall expire"]):
                         continue
                 
+                # Additional validation for specific patterns
+                if "all" in matched_text.lower() or "any" in matched_text.lower():
+                    # Check if there are any limiting words nearby
+                    limiting_words = ["specifically", "identified", "designated", "marked", "labeled"]
+                    if any(word in context for word in limiting_words):
+                        continue  # Skip if there are already limiting words
+                
                 changes.append({
-                    "original_text": match.group(),
-                    "suggested_text": self._generate_suggestion(paragraph, pattern),
+                    "original_text": matched_text,
+                    "suggested_text": self._generate_suggestion(matched_text, pattern),
                     "description": pattern["description"],
                     "suggestion": pattern["suggestion"],
                     "risk_level": pattern["risk_level"],
                     "category": pattern["category"]
                 })
+        
         return changes
 
     def _categorize_clause(self, paragraph: str, embedding: torch.Tensor) -> str:
@@ -268,17 +305,20 @@ class AIService:
             if suggestions:
                 return suggestions[0]  # Use the most common suggestion
         
-        # Fall back to default suggestions
+        # Fall back to default suggestions with more specific alternatives
         if pattern["category"] == "duration":
-            return original_text.replace("perpetual", "for a period of 5 years")
+            return "for a period of 5 years"
         elif pattern["category"] == "scope":
-            return original_text.replace("all information", "specifically identified confidential information")
+            # More specific suggestions based on context
+            if "all" in original_text.lower() or "any" in original_text.lower():
+                return "information that is specifically identified as confidential"
+            return "specifically identified confidential information"
         elif pattern["category"] == "intellectual_property":
-            return original_text.replace("no reverse engineering", "no reverse engineering except for interoperability purposes")
+            return "no reverse engineering except for interoperability purposes"
         elif pattern["category"] == "liability":
-            return original_text.replace("unlimited liability", "liability limited to direct damages")
+            return "liability limited to direct damages"
         
-        return original_text
+        return "Consider revising this clause"
 
     def get_embedding(self, text: str) -> torch.Tensor:
         """
