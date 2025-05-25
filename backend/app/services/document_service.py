@@ -1,8 +1,13 @@
 from docx import Document
-from docx.shared import RGBColor
-from docx.enum.text import WD_COLOR_INDEX
+from docx.shared import RGBColor, Pt
+from docx.enum.text import WD_COLOR_INDEX, WD_PARAGRAPH_ALIGNMENT, WD_LINE_SPACING
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 import os
 from typing import List, Dict, Tuple
+import copy
+import shutil
+import tempfile
 
 class DocumentService:
     def __init__(self, upload_dir: str = "uploads"):
@@ -25,30 +30,28 @@ class DocumentService:
             print(f"Error type: {type(e)}")
             raise
 
+    def _copy_document(self, doc: Document) -> Document:
+        """
+        Create a copy of a document while preserving all formatting
+        """
+        # Save the original document to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as temp_file:
+            doc.save(temp_file.name)
+            # Create a new document from the temporary file
+            new_doc = Document(temp_file.name)
+            # Clean up the temporary file
+            os.unlink(temp_file.name)
+            return new_doc
+
     def create_redline_document(self, original_doc: Document, changes: List[Dict]) -> Document:
         """
         Create a redline version of the document with suggested changes
         """
-        redline_doc = Document()
+        # Create a copy of the original document
+        redline_doc = self._copy_document(original_doc)
         
-        # Copy document properties safely
-        try:
-            if hasattr(original_doc, 'core_properties'):
-                redline_doc.core_properties = original_doc.core_properties
-        except Exception as e:
-            print(f"Warning: Could not copy document properties: {str(e)}")
-        
-        # Process each paragraph
-        for paragraph in original_doc.paragraphs:
-            new_paragraph = redline_doc.add_paragraph()
-            
-            # Copy paragraph formatting
-            try:
-                new_paragraph.style = paragraph.style
-            except Exception as e:
-                print(f"Warning: Could not copy paragraph style: {str(e)}")
-            
-            # Process runs (text with specific formatting)
+        # Process each paragraph to add redline changes
+        for paragraph in redline_doc.paragraphs:
             for run in paragraph.runs:
                 # Check if this run contains any changes
                 is_changed = any(
@@ -58,25 +61,14 @@ class DocumentService:
                 
                 if is_changed:
                     # Add strikethrough for original text
-                    new_run = new_paragraph.add_run(run.text)
-                    new_run.font.strike = True
-                    new_run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
+                    run.font.strike = True
+                    run.font.color.rgb = RGBColor(255, 0, 0)  # Red color
                     
                     # Add suggested text
                     for change in changes:
                         if change['original_text'] in run.text:
-                            suggestion = new_paragraph.add_run(f" → {change['suggested_text']}")
+                            suggestion = paragraph.add_run(f" → {change['suggested_text']}")
                             suggestion.font.color.rgb = RGBColor(255, 0, 0)  # Red color
-                else:
-                    # Copy original text without changes
-                    new_run = new_paragraph.add_run(run.text)
-                    try:
-                        new_run.font.name = run.font.name
-                        new_run.font.size = run.font.size
-                        new_run.font.bold = run.font.bold
-                        new_run.font.italic = run.font.italic
-                    except Exception as e:
-                        print(f"Warning: Could not copy run formatting: {str(e)}")
 
         return redline_doc
 
@@ -84,24 +76,11 @@ class DocumentService:
         """
         Create a clean version of the document with changes applied
         """
-        clean_doc = Document()
+        # Create a copy of the original document
+        clean_doc = self._copy_document(original_doc)
         
-        # Copy document properties safely
-        try:
-            if hasattr(original_doc, 'core_properties'):
-                clean_doc.core_properties = original_doc.core_properties
-        except Exception as e:
-            print(f"Warning: Could not copy document properties: {str(e)}")
-        
-        # Process each paragraph
-        for paragraph in original_doc.paragraphs:
-            new_paragraph = clean_doc.add_paragraph()
-            try:
-                new_paragraph.style = paragraph.style
-            except Exception as e:
-                print(f"Warning: Could not copy paragraph style: {str(e)}")
-            
-            # Process runs
+        # Process each paragraph to apply changes
+        for paragraph in clean_doc.paragraphs:
             for run in paragraph.runs:
                 # Check if this run contains any changes
                 is_changed = any(
@@ -113,28 +92,10 @@ class DocumentService:
                     # Apply suggested changes
                     for change in changes:
                         if change['original_text'] in run.text:
-                            new_text = run.text.replace(
+                            run.text = run.text.replace(
                                 change['original_text'], 
                                 change['suggested_text']
                             )
-                            new_run = new_paragraph.add_run(new_text)
-                            try:
-                                new_run.font.name = run.font.name
-                                new_run.font.size = run.font.size
-                                new_run.font.bold = run.font.bold
-                                new_run.font.italic = run.font.italic
-                            except Exception as e:
-                                print(f"Warning: Could not copy run formatting: {str(e)}")
-                else:
-                    # Copy original text without changes
-                    new_run = new_paragraph.add_run(run.text)
-                    try:
-                        new_run.font.name = run.font.name
-                        new_run.font.size = run.font.size
-                        new_run.font.bold = run.font.bold
-                        new_run.font.italic = run.font.italic
-                    except Exception as e:
-                        print(f"Warning: Could not copy run formatting: {str(e)}")
 
         return clean_doc
 
