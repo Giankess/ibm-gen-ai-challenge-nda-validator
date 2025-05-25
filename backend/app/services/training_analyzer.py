@@ -54,39 +54,59 @@ class TrainingAnalyzer:
         else:
             doc = Document(file_path)
         
+        current_paragraph = []
+        current_strikethrough = []
+        current_red = []
+        
         for paragraph in doc.paragraphs:
-            original_text = ""
-            suggested_text = ""
-            context = []
-            
             for run in paragraph.runs:
                 # Check for strikethrough (original problematic text)
                 if run.font.strike:
-                    original_text += run.text
+                    if current_strikethrough:  # If we already have strikethrough text
+                        # Store the previous pattern
+                        self._store_pattern(current_strikethrough, current_red, current_paragraph)
+                        current_strikethrough = []
+                        current_red = []
+                    current_strikethrough.append(run.text)
                 # Check for red color (suggested changes)
                 elif run.font.color and run.font.color.rgb == RGBColor(255, 0, 0):
-                    suggested_text += run.text
+                    current_red.append(run.text)
                 # Collect context (non-marked text)
                 else:
-                    context.append(run.text)
+                    current_paragraph.append(run.text)
             
-            if original_text and suggested_text:
-                # Extract the pattern category
-                category = self._categorize_pattern(original_text, suggested_text)
-                
-                # Store the pattern
-                self.patterns[category].append({
-                    "original": original_text,
-                    "suggested": suggested_text,
-                    "context": " ".join(context)
-                })
-                
-                # Store the suggestion pattern
-                self.suggestions[category].append(suggested_text)
-                
-                # Store context patterns
-                if context:
-                    self.context_patterns[category].append(" ".join(context))
+            # If we have both strikethrough and red text, store the pattern
+            if current_strikethrough and current_red:
+                self._store_pattern(current_strikethrough, current_red, current_paragraph)
+                current_strikethrough = []
+                current_red = []
+                current_paragraph = []
+
+    def _store_pattern(self, strikethrough: List[str], red: List[str], context: List[str]):
+        """
+        Store a pattern from strikethrough and red text
+        """
+        original_text = " ".join(strikethrough).strip()
+        suggested_text = " ".join(red).strip()
+        context_text = " ".join(context).strip()
+        
+        if original_text and suggested_text:
+            # Extract the pattern category
+            category = self._categorize_pattern(original_text, suggested_text)
+            
+            # Store the pattern
+            self.patterns[category].append({
+                "original": original_text,
+                "suggested": suggested_text,
+                "context": context_text
+            })
+            
+            # Store the suggestion pattern
+            self.suggestions[category].append(suggested_text)
+            
+            # Store context patterns
+            if context_text:
+                self.context_patterns[category].append(context_text)
 
     def _categorize_pattern(self, original: str, suggested: str) -> str:
         """
@@ -112,31 +132,6 @@ class TrainingAnalyzer:
         
         return "other"
 
-    def _compile_patterns(self) -> Dict:
-        """
-        Compile the analyzed patterns into a structured format
-        """
-        compiled_patterns = {}
-        
-        for category, patterns in self.patterns.items():
-            # Extract common patterns in original text
-            original_patterns = self._extract_common_patterns([p["original"] for p in patterns])
-            
-            # Extract common patterns in suggestions
-            suggestion_patterns = self._extract_common_patterns([p["suggested"] for p in patterns])
-            
-            # Extract common context patterns
-            context_patterns = self._extract_common_patterns([p["context"] for p in patterns])
-            
-            compiled_patterns[category] = {
-                "patterns": original_patterns,
-                "suggestions": suggestion_patterns,
-                "context": context_patterns,
-                "examples": patterns[:5]  # Keep first 5 examples
-            }
-        
-        return compiled_patterns
-
     def _extract_common_patterns(self, texts: List[str]) -> List[str]:
         """
         Extract common patterns from a list of texts
@@ -147,13 +142,58 @@ class TrainingAnalyzer:
         # Convert texts to lowercase for comparison
         texts_lower = [text.lower() for text in texts]
         
+        # Find common single words
+        common_words = set()
+        word_counts = defaultdict(int)
+        for text in texts_lower:
+            words = text.split()
+            for word in words:
+                if len(word) > 3:  # Only consider words longer than 3 characters
+                    word_counts[word] += 1
+        
+        # Add words that appear in at least 2 texts
+        for word, count in word_counts.items():
+            if count >= 2:
+                common_words.add(word)
+        
         # Find common phrases (2 or more words)
         common_phrases = set()
         for text in texts_lower:
             words = text.split()
-            for i in range(len(words) - 1):
-                phrase = f"{words[i]} {words[i+1]}"
-                if all(phrase in t for t in texts_lower):
-                    common_phrases.add(phrase)
+            # Look for phrases of 2-4 words
+            for i in range(len(words)):
+                for j in range(2, min(5, len(words) - i + 1)):
+                    phrase = " ".join(words[i:i+j])
+                    if len(phrase) > 5 and all(phrase in t for t in texts_lower):
+                        common_phrases.add(phrase)
         
-        return list(common_phrases) 
+        # Combine single words and phrases
+        patterns = list(common_words) + list(common_phrases)
+        
+        # Sort by length (longer patterns first) and return
+        return sorted(patterns, key=len, reverse=True)
+
+    def _compile_patterns(self) -> Dict:
+        """
+        Compile the analyzed patterns into a structured format
+        """
+        compiled_patterns = {}
+        
+        for category, patterns in self.patterns.items():
+            # Store all original patterns
+            original_patterns = [p["original"] for p in patterns]
+            
+            # Store all suggestions
+            suggestion_patterns = [p["suggested"] for p in patterns]
+            
+            # Store all context patterns
+            context_patterns = [p["context"] for p in patterns if p["context"]]
+            
+            compiled_patterns[category] = {
+                "patterns": original_patterns,
+                "suggestions": suggestion_patterns,
+                "context": context_patterns,
+                "examples": patterns[:5]  # Keep first 5 examples
+            }
+        
+        return compiled_patterns 

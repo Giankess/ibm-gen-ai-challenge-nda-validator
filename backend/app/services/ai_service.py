@@ -63,14 +63,17 @@ class AIService:
         
         # Add patterns from training data
         for category, data in self.trained_patterns.items():
-            for pattern in data["patterns"]:
+            for i, pattern in enumerate(data["patterns"]):
+                suggestion = data["suggestions"][i] if i < len(data["suggestions"]) else self._get_suggestion(category, pattern)
+                context = data["context"][i] if i < len(data["context"]) else []
+                
                 patterns.append({
-                    "pattern": self._create_regex_pattern(pattern),
+                    "pattern": pattern,  # Use exact pattern from training
                     "description": f"Problematic {category} clause",
-                    "suggestion": self._get_suggestion(category, pattern),
+                    "suggestion": suggestion,
                     "risk_level": self.clause_categories.get(category, {}).get("risk_level", "medium"),
                     "category": category,
-                    "context_patterns": data["context"]
+                    "context_patterns": [context] if context else []
                 })
         
         # Add default patterns if no training data
@@ -179,49 +182,23 @@ class AIService:
             # First check if the context patterns are present
             if pattern.get("context_patterns"):
                 context_match = any(
-                    context in paragraph_lower 
+                    context.lower() in paragraph_lower 
                     for context in pattern["context_patterns"]
                 )
                 if not context_match:
                     continue
             
             # Then look for the specific pattern
-            matches = re.finditer(pattern["pattern"], paragraph, re.IGNORECASE)
-            for match in matches:
+            pattern_text = pattern["pattern"]
+            if pattern_text.lower() in paragraph_lower:
                 # Get the matched text and its surrounding context
-                matched_text = match.group()
-                start_pos = max(0, match.start() - 100)  # Increased context window
-                end_pos = min(len(paragraph), match.end() + 100)
-                context = paragraph[start_pos:end_pos].lower()
-                
-                # Enhanced context validation
-                if pattern["category"] == "scope":
-                    # For scope patterns, ensure we're in a confidentiality context
-                    # and that the clause is actually defining scope (not just mentioning it)
-                    if not any(word in context for word in ["confidential", "secret", "proprietary"]):
-                        continue
-                    # Check if this is actually a scope definition clause
-                    if not any(phrase in context for phrase in ["shall include", "means", "refers to", "defined as"]):
-                        continue
-                elif pattern["category"] == "duration":
-                    # For duration patterns, ensure we're in a confidentiality context
-                    # and that the clause is actually about duration (not just mentioning time)
-                    if not any(word in context for word in ["confidential", "secret", "proprietary", "term", "period"]):
-                        continue
-                    # Check if this is actually a duration clause
-                    if not any(phrase in context for phrase in ["shall continue", "shall remain", "shall survive", "shall expire"]):
-                        continue
-                
-                # Additional validation for specific patterns
-                if "all" in matched_text.lower() or "any" in matched_text.lower():
-                    # Check if there are any limiting words nearby
-                    limiting_words = ["specifically", "identified", "designated", "marked", "labeled"]
-                    if any(word in context for word in limiting_words):
-                        continue  # Skip if there are already limiting words
+                start_pos = paragraph_lower.find(pattern_text.lower())
+                end_pos = start_pos + len(pattern_text)
+                context = paragraph[max(0, start_pos - 100):min(len(paragraph), end_pos + 100)].lower()
                 
                 changes.append({
-                    "original_text": matched_text,
-                    "suggested_text": self._generate_suggestion(matched_text, pattern),
+                    "original_text": pattern_text,
+                    "suggested_text": pattern["suggestion"],
                     "description": pattern["description"],
                     "suggestion": pattern["suggestion"],
                     "risk_level": pattern["risk_level"],
