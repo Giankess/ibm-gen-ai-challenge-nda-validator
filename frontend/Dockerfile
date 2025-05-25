@@ -12,8 +12,8 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Build the app
-RUN npm run build
+# Build the app with verbose output
+RUN npm run build --verbose
 
 # Production stage
 FROM nginx:alpine
@@ -27,5 +27,5 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Expose port
 EXPOSE 80
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"] 
+# Start nginx with debug logging
+CMD ["nginx", "-g", "daemon off; error_log /dev/stdout debug;"] 

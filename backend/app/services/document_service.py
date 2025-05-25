@@ -13,9 +13,17 @@ class DocumentService:
         """
         Parse a Word document and return its paragraphs and the document object
         """
-        doc = Document(file_path)
-        paragraphs = [p.text for p in doc.paragraphs]
-        return paragraphs, doc
+        try:
+            print(f"Opening document at path: {file_path}")
+            doc = Document(file_path)
+            print(f"Successfully opened document. Number of paragraphs: {len(doc.paragraphs)}")
+            paragraphs = [p.text for p in doc.paragraphs]
+            print(f"Extracted {len(paragraphs)} paragraphs")
+            return paragraphs, doc
+        except Exception as e:
+            print(f"Error parsing document: {str(e)}")
+            print(f"Error type: {type(e)}")
+            raise
 
     def create_redline_document(self, original_doc: Document, changes: List[Dict]) -> Document:
         """
@@ -23,15 +31,22 @@ class DocumentService:
         """
         redline_doc = Document()
         
-        # Copy document properties
-        redline_doc.core_properties = original_doc.core_properties
+        # Copy document properties safely
+        try:
+            if hasattr(original_doc, 'core_properties'):
+                redline_doc.core_properties = original_doc.core_properties
+        except Exception as e:
+            print(f"Warning: Could not copy document properties: {str(e)}")
         
         # Process each paragraph
         for paragraph in original_doc.paragraphs:
             new_paragraph = redline_doc.add_paragraph()
             
             # Copy paragraph formatting
-            new_paragraph.style = paragraph.style
+            try:
+                new_paragraph.style = paragraph.style
+            except Exception as e:
+                print(f"Warning: Could not copy paragraph style: {str(e)}")
             
             # Process runs (text with specific formatting)
             for run in paragraph.runs:
@@ -55,10 +70,13 @@ class DocumentService:
                 else:
                     # Copy original text without changes
                     new_run = new_paragraph.add_run(run.text)
-                    new_run.font.name = run.font.name
-                    new_run.font.size = run.font.size
-                    new_run.font.bold = run.font.bold
-                    new_run.font.italic = run.font.italic
+                    try:
+                        new_run.font.name = run.font.name
+                        new_run.font.size = run.font.size
+                        new_run.font.bold = run.font.bold
+                        new_run.font.italic = run.font.italic
+                    except Exception as e:
+                        print(f"Warning: Could not copy run formatting: {str(e)}")
 
         return redline_doc
 
@@ -68,13 +86,20 @@ class DocumentService:
         """
         clean_doc = Document()
         
-        # Copy document properties
-        clean_doc.core_properties = original_doc.core_properties
+        # Copy document properties safely
+        try:
+            if hasattr(original_doc, 'core_properties'):
+                clean_doc.core_properties = original_doc.core_properties
+        except Exception as e:
+            print(f"Warning: Could not copy document properties: {str(e)}")
         
         # Process each paragraph
         for paragraph in original_doc.paragraphs:
             new_paragraph = clean_doc.add_paragraph()
-            new_paragraph.style = paragraph.style
+            try:
+                new_paragraph.style = paragraph.style
+            except Exception as e:
+                print(f"Warning: Could not copy paragraph style: {str(e)}")
             
             # Process runs
             for run in paragraph.runs:
@@ -93,17 +118,23 @@ class DocumentService:
                                 change['suggested_text']
                             )
                             new_run = new_paragraph.add_run(new_text)
-                            new_run.font.name = run.font.name
-                            new_run.font.size = run.font.size
-                            new_run.font.bold = run.font.bold
-                            new_run.font.italic = run.font.italic
+                            try:
+                                new_run.font.name = run.font.name
+                                new_run.font.size = run.font.size
+                                new_run.font.bold = run.font.bold
+                                new_run.font.italic = run.font.italic
+                            except Exception as e:
+                                print(f"Warning: Could not copy run formatting: {str(e)}")
                 else:
                     # Copy original text without changes
                     new_run = new_paragraph.add_run(run.text)
-                    new_run.font.name = run.font.name
-                    new_run.font.size = run.font.size
-                    new_run.font.bold = run.font.bold
-                    new_run.font.italic = run.font.italic
+                    try:
+                        new_run.font.name = run.font.name
+                        new_run.font.size = run.font.size
+                        new_run.font.bold = run.font.bold
+                        new_run.font.italic = run.font.italic
+                    except Exception as e:
+                        print(f"Warning: Could not copy run formatting: {str(e)}")
 
         return clean_doc
 

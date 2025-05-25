@@ -8,8 +8,12 @@ from .training_analyzer import TrainingAnalyzer
 
 class AIService:
     def __init__(self):
-        # Initialize the model (using a smaller model for local deployment)
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        try:
+            # Initialize the model (using a smaller model for local deployment)
+            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        except Exception as e:
+            print(f"Warning: Could not load model: {str(e)}")
+            self.model = None
         
         # Initialize training analyzer and load patterns
         self.training_analyzer = TrainingAnalyzer()
@@ -280,4 +284,8 @@ class AIService:
         """
         Get the embedding for a piece of text
         """
-        return self.model.encode(text) 
+        if self.model is None:
+            # Return a zero tensor if model is not available
+            return torch.zeros(384)  # 384 is the dimension of all-MiniLM-L6-v2
+        # Convert numpy array to PyTorch tensor
+        return torch.tensor(self.model.encode(text)) 

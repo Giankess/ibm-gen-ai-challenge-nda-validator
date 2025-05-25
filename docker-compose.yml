@@ -4,15 +4,20 @@ services:
   backend:
     build: ./backend
     ports:
-      - "8000:8000"
+      - "5000:5000"
     volumes:
       - ./backend/uploads:/app/uploads
       - ./backend/training_data:/app/training_data
+    environment:
+      - FLASK_ENV=development
+      - FLASK_APP=app.py
+    networks:
+      - app-network
 
   frontend:
     build: ./frontend
     ports:
-      - "3000:3000"
+      - "3000:80"
     depends_on:
       - backend
     networks:

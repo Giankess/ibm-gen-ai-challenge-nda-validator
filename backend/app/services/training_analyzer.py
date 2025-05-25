@@ -4,6 +4,8 @@ from typing import List, Dict, Tuple
 import re
 from collections import defaultdict
 import os
+import subprocess
+import tempfile
 
 class TrainingAnalyzer:
     def __init__(self, training_dir: str = "training_data"):
@@ -22,7 +24,10 @@ class TrainingAnalyzer:
         for filename in os.listdir(self.training_dir):
             if filename.endswith(('.docx', '.doc')):
                 file_path = os.path.join(self.training_dir, filename)
-                self._analyze_document(file_path)
+                try:
+                    self._analyze_document(file_path)
+                except Exception as e:
+                    print(f"Warning: Could not analyze {filename}: {str(e)}")
 
         return self._compile_patterns()
 
@@ -30,7 +35,24 @@ class TrainingAnalyzer:
         """
         Analyze a single training document
         """
-        doc = Document(file_path)
+        if file_path.endswith('.doc'):
+            # Convert .doc to .docx using LibreOffice
+            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
+                docx_path = tmp.name
+            try:
+                subprocess.run([
+                    'soffice',
+                    '--headless',
+                    '--convert-to', 'docx',
+                    '--outdir', os.path.dirname(docx_path),
+                    file_path
+                ], check=True)
+                doc = Document(docx_path)
+            finally:
+                if os.path.exists(docx_path):
+                    os.unlink(docx_path)
+        else:
+            doc = Document(file_path)
         
         for paragraph in doc.paragraphs:
             original_text = ""
