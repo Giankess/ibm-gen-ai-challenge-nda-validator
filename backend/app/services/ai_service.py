@@ -4,11 +4,20 @@ import torch
 import re
 from collections import defaultdict
 import numpy as np
+from .training_analyzer import TrainingAnalyzer
 
 class AIService:
     def __init__(self):
         # Initialize the model (using a smaller model for local deployment)
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        # Initialize training analyzer and load patterns
+        self.training_analyzer = TrainingAnalyzer()
+        try:
+            self.trained_patterns = self.training_analyzer.analyze_training_data()
+        except FileNotFoundError:
+            print("Warning: No training data found. Using default patterns.")
+            self.trained_patterns = {}
         
         # Define clause categories and their risk levels
         self.clause_categories = {
@@ -39,51 +48,75 @@ class AIService:
             }
         }
         
-        # Common problematic patterns with enhanced detection
-        self.problematic_patterns = [
-            {
-                "pattern": r"(?:perpetual|indefinite|forever|without\s+time\s+limit)",
-                "description": "Perpetual confidentiality obligations",
-                "suggestion": "Consider adding a reasonable time limit for confidentiality obligations",
-                "risk_level": "high",
-                "category": "duration"
-            },
-            {
-                "pattern": r"(?:all|any|every)\s+(?:information|data|material|document)",
-                "description": "Overly broad confidentiality scope",
-                "suggestion": "Specify the types of information that are considered confidential",
-                "risk_level": "high",
-                "category": "scope"
-            },
-            {
-                "pattern": r"(?:no|prohibited|restricted)\s+(?:reverse\s+engineering|decompilation|disassembly)",
-                "description": "Restrictive reverse engineering clause",
-                "suggestion": "Consider allowing reverse engineering for interoperability purposes",
-                "risk_level": "medium",
-                "category": "intellectual_property"
-            },
-            {
-                "pattern": r"(?:assign|transfer|convey).*(?:without|prior|written)\s+consent",
-                "description": "Restrictive assignment clause",
-                "suggestion": "Allow assignment to affiliates or in case of merger/acquisition",
-                "risk_level": "medium",
-                "category": "scope"
-            },
-            {
-                "pattern": r"(?:unlimited|uncapped|no\s+limit).*(?:liability|damages|indemnification)",
-                "description": "Unlimited liability provision",
-                "suggestion": "Consider reasonable limitations on liability",
-                "risk_level": "high",
-                "category": "liability"
-            },
-            {
-                "pattern": r"(?:irrevocable|permanent).*(?:license|right|permission)",
-                "description": "Irrevocable rights grant",
-                "suggestion": "Consider adding conditions for revocation",
-                "risk_level": "high",
-                "category": "intellectual_property"
-            }
-        ]
+        # Initialize problematic patterns from training data
+        self.problematic_patterns = self._initialize_patterns()
+
+    def _initialize_patterns(self) -> List[Dict]:
+        """
+        Initialize problematic patterns from training data and default patterns
+        """
+        patterns = []
+        
+        # Add patterns from training data
+        for category, data in self.trained_patterns.items():
+            for pattern in data["patterns"]:
+                patterns.append({
+                    "pattern": self._create_regex_pattern(pattern),
+                    "description": f"Problematic {category} clause",
+                    "suggestion": self._get_suggestion(category, pattern),
+                    "risk_level": self.clause_categories.get(category, {}).get("risk_level", "medium"),
+                    "category": category,
+                    "context_patterns": data["context"]
+                })
+        
+        # Add default patterns if no training data
+        if not patterns:
+            patterns = [
+                {
+                    "pattern": r"(?:perpetual|indefinite|forever|without\s+time\s+limit)",
+                    "description": "Perpetual confidentiality obligations",
+                    "suggestion": "Consider adding a reasonable time limit for confidentiality obligations",
+                    "risk_level": "high",
+                    "category": "duration"
+                },
+                {
+                    "pattern": r"(?:all|any|every)\s+(?:information|data|material|document)",
+                    "description": "Overly broad confidentiality scope",
+                    "suggestion": "Specify the types of information that are considered confidential",
+                    "risk_level": "high",
+                    "category": "scope"
+                }
+            ]
+        
+        return patterns
+
+    def _create_regex_pattern(self, text: str) -> str:
+        """
+        Create a regex pattern from text, handling common variations
+        """
+        # Replace common variations
+        text = text.lower()
+        text = re.sub(r'\s+', r'\\s+', text)  # Handle multiple spaces
+        text = re.sub(r'[.,;]', r'[.,;]?', text)  # Handle optional punctuation
+        return f"(?:{text})"
+
+    def _get_suggestion(self, category: str, pattern: str) -> str:
+        """
+        Get a suggestion based on training data or default suggestions
+        """
+        if category in self.trained_patterns and self.trained_patterns[category]["suggestions"]:
+            # Use the most common suggestion from training data
+            return self.trained_patterns[category]["suggestions"][0]
+        
+        # Default suggestions
+        suggestions = {
+            "confidentiality": "Specify the types of information that are considered confidential",
+            "duration": "Consider adding a reasonable time limit",
+            "scope": "Narrow the scope to specific purposes",
+            "liability": "Consider reasonable limitations on liability",
+            "intellectual_property": "Clarify ownership and usage rights"
+        }
+        return suggestions.get(category, "Consider revising this clause")
 
     def analyze_nda(self, paragraphs: List[str]) -> Dict:
         """
@@ -137,6 +170,15 @@ class AIService:
         for pattern in self.problematic_patterns:
             matches = re.finditer(pattern["pattern"], paragraph, re.IGNORECASE)
             for match in matches:
+                # Check context if available
+                if pattern.get("context_patterns"):
+                    context_match = any(
+                        context in paragraph.lower() 
+                        for context in pattern["context_patterns"]
+                    )
+                    if not context_match:
+                        continue
+                
                 changes.append({
                     "original_text": match.group(),
                     "suggested_text": self._generate_suggestion(paragraph, pattern),
@@ -216,6 +258,13 @@ class AIService:
         """
         Generate a suggestion for the problematic clause
         """
+        if pattern["category"] in self.trained_patterns:
+            # Use trained suggestions if available
+            suggestions = self.trained_patterns[pattern["category"]]["suggestions"]
+            if suggestions:
+                return suggestions[0]  # Use the most common suggestion
+        
+        # Fall back to default suggestions
         if pattern["category"] == "duration":
             return original_text.replace("perpetual", "for a period of 5 years")
         elif pattern["category"] == "scope":
