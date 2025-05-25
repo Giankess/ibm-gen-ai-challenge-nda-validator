@@ -61,15 +61,32 @@ class AIService:
         """
         patterns = []
         
+        print("Initializing patterns from training data...")  # Debug log
+        
         # Add patterns from training data
         for category, data in self.trained_patterns.items():
+            print(f"Processing category: {category}")  # Debug log
+            print(f"Number of patterns in category: {len(data['patterns'])}")  # Debug log
+            
             for i, pattern in enumerate(data["patterns"]):
                 suggestion = data["suggestions"][i] if i < len(data["suggestions"]) else self._get_suggestion(category, pattern)
                 context = data["context"][i] if i < len(data["context"]) else []
                 
+                # Create both exact and regex patterns
                 patterns.append({
-                    "pattern": pattern,  # Use exact pattern from training
+                    "pattern": pattern,  # Exact pattern
                     "description": f"Problematic {category} clause",
+                    "suggestion": suggestion,
+                    "risk_level": self.clause_categories.get(category, {}).get("risk_level", "medium"),
+                    "category": category,
+                    "context_patterns": [context] if context else []
+                })
+                
+                # Add regex pattern for more flexible matching
+                regex_pattern = self._create_regex_pattern(pattern)
+                patterns.append({
+                    "pattern": re.compile(regex_pattern, re.IGNORECASE),  # Regex pattern
+                    "description": f"Problematic {category} clause (regex)",
                     "suggestion": suggestion,
                     "risk_level": self.clause_categories.get(category, {}).get("risk_level", "medium"),
                     "category": category,
@@ -78,6 +95,7 @@ class AIService:
         
         # Add default patterns if no training data
         if not patterns:
+            print("No training data found, using default patterns")  # Debug log
             patterns = [
                 {
                     "pattern": r"\b(?:perpetual|indefinite|forever|without\s+time\s+limit)\b",
@@ -97,6 +115,7 @@ class AIService:
                 }
             ]
         
+        print(f"Total number of patterns initialized: {len(patterns)}")  # Debug log
         return patterns
 
     def _create_regex_pattern(self, text: str) -> str:
@@ -178,6 +197,9 @@ class AIService:
         changes = []
         paragraph_lower = paragraph.lower()
         
+        print(f"\nChecking paragraph: {paragraph_lower[:100]}...")
+        print(f"Number of patterns to check: {len(self.problematic_patterns)}")
+        
         for pattern in self.problematic_patterns:
             # First check if the context patterns are present
             if pattern.get("context_patterns"):
@@ -190,21 +212,54 @@ class AIService:
             
             # Then look for the specific pattern
             pattern_text = pattern["pattern"]
-            if pattern_text.lower() in paragraph_lower:
-                # Get the matched text and its surrounding context
-                start_pos = paragraph_lower.find(pattern_text.lower())
-                end_pos = start_pos + len(pattern_text)
-                context = paragraph[max(0, start_pos - 100):min(len(paragraph), end_pos + 100)].lower()
-                
-                changes.append({
-                    "original_text": pattern_text,
-                    "suggested_text": pattern["suggestion"],
-                    "description": pattern["description"],
-                    "suggestion": pattern["suggestion"],
-                    "risk_level": pattern["risk_level"],
-                    "category": pattern["category"]
-                })
+            
+            # Handle both string and regex patterns
+            if isinstance(pattern_text, str):
+                # Try exact match first
+                if pattern_text.lower() in paragraph_lower:
+                    print(f"Found exact match for pattern: {pattern_text}")
+                    start_pos = paragraph_lower.find(pattern_text.lower())
+                    end_pos = start_pos + len(pattern_text)
+                    context = paragraph[max(0, start_pos - 100):min(len(paragraph), end_pos + 100)]
+                    
+                    changes.append({
+                        "original_text": pattern_text,
+                        "suggested_text": pattern["suggestion"],
+                        "description": pattern["description"],
+                        "suggestion": pattern["suggestion"],
+                        "risk_level": pattern["risk_level"],
+                        "category": pattern["category"]
+                    })
+                else:
+                    # Try partial match if exact match fails
+                    words = pattern_text.lower().split()
+                    if len(words) > 2:  # Only try partial matches for longer phrases
+                        # Check if most words from the pattern are present in the paragraph
+                        matching_words = sum(1 for word in words if word in paragraph_lower)
+                        if matching_words >= len(words) * 0.7:  # 70% of words must match
+                            print(f"Found partial match for pattern: {pattern_text}")
+                            changes.append({
+                                "original_text": pattern_text,
+                                "suggested_text": pattern["suggestion"],
+                                "description": pattern["description"],
+                                "suggestion": pattern["suggestion"],
+                                "risk_level": pattern["risk_level"],
+                                "category": pattern["category"]
+                            })
+            else:  # Handle regex patterns
+                matches = re.finditer(pattern_text, paragraph_lower)
+                for match in matches:
+                    print(f"Found regex match: {match.group()}")
+                    changes.append({
+                        "original_text": match.group(),
+                        "suggested_text": pattern["suggestion"],
+                        "description": pattern["description"],
+                        "suggestion": pattern["suggestion"],
+                        "risk_level": pattern["risk_level"],
+                        "category": pattern["category"]
+                    })
         
+        print(f"Found {len(changes)} changes")
         return changes
 
     def _categorize_clause(self, paragraph: str, embedding: torch.Tensor) -> str:

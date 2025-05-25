@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
-COPY . .
+# Copy the application code
+COPY app/ app/
 
-# Create training data directory
-RUN mkdir -p training_data
+# Copy training data directory
+COPY training_data/ training_data/
 
 # Expose the port the app runs on
 EXPOSE 5000

@@ -6,10 +6,27 @@ from collections import defaultdict
 import os
 import subprocess
 import tempfile
+import zipfile
+from lxml import etree
+import io
 
 class TrainingAnalyzer:
-    def __init__(self, training_dir: str = "training_data"):
-        self.training_dir = training_dir
+    def __init__(self, training_dir: str = None):
+        if training_dir is None:
+            # Get the absolute path to the training_data directory
+            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            self.training_dir = os.path.join(current_dir, "training_data")
+            print(f"Training directory path: {self.training_dir}")  # Debug log
+            if not os.path.exists(self.training_dir):
+                print(f"Warning: Training directory not found at {self.training_dir}")
+                # Try alternative path
+                alt_path = os.path.join(os.path.dirname(current_dir), "backend", "training_data")
+                print(f"Trying alternative path: {alt_path}")
+                if os.path.exists(alt_path):
+                    self.training_dir = alt_path
+                    print(f"Found training data at: {self.training_dir}")
+        else:
+            self.training_dir = training_dir
         self.patterns = defaultdict(list)
         self.suggestions = defaultdict(list)
         self.context_patterns = defaultdict(list)
@@ -21,20 +38,105 @@ class TrainingAnalyzer:
         if not os.path.exists(self.training_dir):
             raise FileNotFoundError(f"Training directory {self.training_dir} not found")
 
+        print(f"\nAnalyzing training data in directory: {self.training_dir}")
+        print(f"Found files: {os.listdir(self.training_dir)}")
+
+        # Reset patterns before analysis
+        self.patterns = defaultdict(list)
+        self.suggestions = defaultdict(list)
+        self.context_patterns = defaultdict(list)
+
         for filename in os.listdir(self.training_dir):
             if filename.endswith(('.docx', '.doc')):
                 file_path = os.path.join(self.training_dir, filename)
                 try:
+                    print(f"\nProcessing file: {filename}")
                     self._analyze_document(file_path)
                 except Exception as e:
                     print(f"Warning: Could not analyze {filename}: {str(e)}")
 
-        return self._compile_patterns()
+        compiled_patterns = self._compile_patterns()
+        
+        # Print detailed summary of compiled patterns
+        print("\nTraining Data Analysis Summary:")
+        print("===============================")
+        for category, data in compiled_patterns.items():
+            print(f"\nCategory: {category}")
+            print(f"Number of patterns: {len(data['patterns'])}")
+            print(f"Number of suggestions: {len(data['suggestions'])}")
+            print(f"Number of context patterns: {len(data['context'])}")
+            if data['patterns']:
+                print("\nSample patterns:")
+                for i, pattern in enumerate(data['patterns'][:3]):  # Show first 3 patterns
+                    print(f"\nPattern {i+1}:")
+                    print(f"Original: {pattern}")
+                    print(f"Suggested: {data['suggestions'][i] if i < len(data['suggestions']) else 'No suggestion'}")
+                    if i < len(data['context']):
+                        print(f"Context: {data['context'][i]}")
+
+        return compiled_patterns
+
+    def _extract_redline_changes(self, docx_path: str) -> List[Dict]:
+        """
+        Extract all redline changes from a .docx file using direct XML parsing
+        """
+        changes = []
+        namespaces = {
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        }
+
+        try:
+            with zipfile.ZipFile(docx_path, 'r') as docx_file:
+                # Read document.xml content
+                document_xml_content = docx_file.read('word/document.xml')
+                
+                # Parse the XML content
+                root = etree.fromstring(document_xml_content)
+                
+                # Find all <w:ins> and <w:del> elements
+                revision_elements = root.xpath('//w:ins | //w:del', namespaces=namespaces)
+                
+                print(f"\nFound {len(revision_elements)} revision elements in {docx_path}")
+                
+                for element in revision_elements:
+                    change_type = None
+                    if element.tag == f"{{{namespaces['w']}}}ins":
+                        change_type = "insertion"
+                    elif element.tag == f"{{{namespaces['w']}}}del":
+                        change_type = "deletion"
+                    else:
+                        continue
+                    
+                    # Get the text content
+                    text = "".join(element.xpath('.//w:t/text()', namespaces=namespaces))
+                    
+                    # Get the author and date if available
+                    author = element.get(f"{{{namespaces['w']}}}author", "Unknown")
+                    date = element.get(f"{{{namespaces['w']}}}date", "Unknown")
+                    
+                    print(f"\nFound {change_type}:")
+                    print(f"Text: {text}")
+                    print(f"Author: {author}")
+                    print(f"Date: {date}")
+                    
+                    changes.append({
+                        "type": change_type,
+                        "text": text,
+                        "author": author,
+                        "date": date
+                    })
+                
+        except Exception as e:
+            print(f"Error processing {docx_path}: {str(e)}")
+        
+        return changes
 
     def _analyze_document(self, file_path: str):
         """
-        Analyze a single training document
+        Analyze a single training document for redline changes
         """
+        print(f"\nAnalyzing document: {file_path}")
+        
         if file_path.endswith('.doc'):
             # Convert .doc to .docx using LibreOffice
             with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
@@ -52,35 +154,39 @@ class TrainingAnalyzer:
                 if os.path.exists(docx_path):
                     os.unlink(docx_path)
         else:
+            docx_path = file_path
             doc = Document(file_path)
         
-        current_paragraph = []
-        current_strikethrough = []
-        current_red = []
+        # Extract redline changes using XML parsing
+        changes = self._extract_redline_changes(docx_path)
         
-        for paragraph in doc.paragraphs:
-            for run in paragraph.runs:
-                # Check for strikethrough (original problematic text)
-                if run.font.strike:
-                    if current_strikethrough:  # If we already have strikethrough text
-                        # Store the previous pattern
-                        self._store_pattern(current_strikethrough, current_red, current_paragraph)
-                        current_strikethrough = []
-                        current_red = []
-                    current_strikethrough.append(run.text)
-                # Check for red color (suggested changes)
-                elif run.font.color and run.font.color.rgb == RGBColor(255, 0, 0):
-                    current_red.append(run.text)
-                # Collect context (non-marked text)
-                else:
-                    current_paragraph.append(run.text)
+        # Process the changes to find patterns
+        current_deletions = []
+        current_insertions = []
+        current_context = []
+        
+        for change in changes:
+            if change["type"] == "deletion":
+                current_deletions.append(change["text"])
+            elif change["type"] == "insertion":
+                current_insertions.append(change["text"])
             
-            # If we have both strikethrough and red text, store the pattern
-            if current_strikethrough and current_red:
-                self._store_pattern(current_strikethrough, current_red, current_paragraph)
-                current_strikethrough = []
-                current_red = []
-                current_paragraph = []
+            # If we have both deletions and insertions, store the pattern
+            if current_deletions and current_insertions:
+                print(f"\nFound pattern:")
+                print(f"Deletions: {' '.join(current_deletions)}")
+                print(f"Insertions: {' '.join(current_insertions)}")
+                print(f"Context: {' '.join(current_context)}")
+                
+                self._store_pattern(current_deletions, current_insertions, current_context)
+                current_deletions = []
+                current_insertions = []
+                current_context = []
+        
+        # Also analyze the document structure for context
+        for paragraph in doc.paragraphs:
+            if not any(change["text"] in paragraph.text for change in changes):
+                current_context.append(paragraph.text)
 
     def _store_pattern(self, strikethrough: List[str], red: List[str], context: List[str]):
         """
@@ -90,9 +196,15 @@ class TrainingAnalyzer:
         suggested_text = " ".join(red).strip()
         context_text = " ".join(context).strip()
         
-        if original_text and suggested_text:
+        if original_text or suggested_text:  # Changed from 'and' to 'or' since we might have only insertions or deletions
             # Extract the pattern category
-            category = self._categorize_pattern(original_text, suggested_text)
+            category = self._categorize_pattern(original_text or suggested_text, suggested_text or original_text)
+            
+            print(f"\nStoring new pattern:")
+            print(f"Category: {category}")
+            print(f"Original: {original_text}")
+            print(f"Suggested: {suggested_text}")
+            print(f"Context: {context_text}")
             
             # Store the pattern
             self.patterns[category].append({
@@ -102,11 +214,17 @@ class TrainingAnalyzer:
             })
             
             # Store the suggestion pattern
-            self.suggestions[category].append(suggested_text)
+            if suggested_text:
+                self.suggestions[category].append(suggested_text)
             
             # Store context patterns
             if context_text:
                 self.context_patterns[category].append(context_text)
+            
+            print(f"Current pattern counts for {category}:")
+            print(f"Patterns: {len(self.patterns[category])}")
+            print(f"Suggestions: {len(self.suggestions[category])}")
+            print(f"Context patterns: {len(self.context_patterns[category])}")
 
     def _categorize_pattern(self, original: str, suggested: str) -> str:
         """
@@ -114,18 +232,18 @@ class TrainingAnalyzer:
         """
         # Define category keywords
         categories = {
-            "confidentiality": ["confidential", "secret", "proprietary", "trade secret"],
-            "duration": ["perpetual", "term", "period", "duration", "expiration"],
-            "scope": ["scope", "purpose", "use", "application", "all", "any"],
-            "liability": ["liability", "damages", "indemnification", "warranty"],
-            "intellectual_property": ["intellectual property", "ip", "patent", "copyright", "trademark"],
-            "assignment": ["assign", "transfer", "convey", "license"],
+            "confidentiality": ["confidential", "secret", "proprietary", "trade secret", "disclose", "disclosure"],
+            "duration": ["perpetual", "term", "period", "duration", "expiration", "during"],
+            "scope": ["scope", "purpose", "use", "application", "all", "any", "business"],
+            "liability": ["liability", "damages", "indemnification", "warranty", "warrant"],
+            "intellectual_property": ["intellectual property", "ip", "patent", "copyright", "trademark", "license"],
+            "assignment": ["assign", "transfer", "convey", "license", "grant"],
             "termination": ["terminate", "termination", "end", "expire"],
-            "governing_law": ["governing law", "jurisdiction", "venue", "dispute"]
+            "governing_law": ["governing law", "jurisdiction", "venue", "dispute", "applicable law"]
         }
         
-        # Check which category keywords appear in the original text
-        text_lower = original.lower()
+        # Check which category keywords appear in either the original or suggested text
+        text_lower = (original + " " + suggested).lower()
         for category, keywords in categories.items():
             if any(keyword in text_lower for keyword in keywords):
                 return category
@@ -179,21 +297,53 @@ class TrainingAnalyzer:
         """
         compiled_patterns = {}
         
+        print("\nCompiling patterns:")
+        print("==================")
+        
         for category, patterns in self.patterns.items():
+            print(f"\nCategory: {category}")
+            print(f"Number of patterns: {len(patterns)}")
+            
+            if not patterns:
+                continue
+            
             # Store all original patterns
-            original_patterns = [p["original"] for p in patterns]
+            original_patterns = [p["original"] for p in patterns if p["original"]]
             
             # Store all suggestions
-            suggestion_patterns = [p["suggested"] for p in patterns]
+            suggestion_patterns = [p["suggested"] for p in patterns if p["suggested"]]
             
             # Store all context patterns
             context_patterns = [p["context"] for p in patterns if p["context"]]
             
-            compiled_patterns[category] = {
-                "patterns": original_patterns,
-                "suggestions": suggestion_patterns,
-                "context": context_patterns,
-                "examples": patterns[:5]  # Keep first 5 examples
+            # Only add category if we have patterns
+            if original_patterns or suggestion_patterns:
+                compiled_patterns[category] = {
+                    "patterns": original_patterns,
+                    "suggestions": suggestion_patterns,
+                    "context": context_patterns,
+                    "examples": patterns[:5]  # Keep first 5 examples
+                }
+                
+                print(f"Compiled {len(original_patterns)} patterns")
+                print(f"Compiled {len(suggestion_patterns)} suggestions")
+                print(f"Compiled {len(context_patterns)} context patterns")
+        
+        if not compiled_patterns:
+            print("No patterns found in training data, using default patterns")
+            compiled_patterns = {
+                "confidentiality": {
+                    "patterns": ["all information", "any information"],
+                    "suggestions": ["specifically identified confidential information"],
+                    "context": ["confidential", "secret", "proprietary"],
+                    "examples": []
+                },
+                "duration": {
+                    "patterns": ["perpetual", "indefinite"],
+                    "suggestions": ["for a period of 5 years"],
+                    "context": ["confidentiality", "obligation"],
+                    "examples": []
+                }
             }
         
         return compiled_patterns 
