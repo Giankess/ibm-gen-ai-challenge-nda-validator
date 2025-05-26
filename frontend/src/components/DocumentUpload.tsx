@@ -8,6 +8,7 @@ import {
   Button,
   Alert,
   Stack,
+  Fade,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -137,71 +138,143 @@ const DocumentUpload: React.FC = () => {
   });
 
   return (
-    <Box sx={{ width: '100%', maxWidth: 600, mx: 'auto', textAlign: 'center' }}>
-      <Typography variant="h4" component="h1" gutterBottom>
-        NDA Validator
-      </Typography>
-      <Typography variant="body1" color="text.secondary" paragraph>
-        Upload your NDA document for validation
-      </Typography>
-
+    <Box sx={{ width: '100%', maxWidth: 800, mx: 'auto' }}>
       <Paper
         {...getRootProps()}
         sx={{
-          p: 4,
-          mt: 2,
+          p: { xs: 4, md: 6 },
           border: '2px dashed',
           borderColor: isDragActive ? 'primary.main' : 'grey.300',
           backgroundColor: isDragActive ? 'action.hover' : 'background.paper',
           cursor: 'pointer',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           '&:hover': {
             borderColor: 'primary.main',
             backgroundColor: 'action.hover',
+            transform: 'translateY(-4px)',
+            boxShadow: '0 8px 24px rgba(0, 51, 102, 0.12)',
           },
         }}
       >
         <input {...getInputProps()} />
-        <CloudUploadIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
-        <Typography variant="body1">
-          {isDragActive
-            ? 'Drop the document here'
-            : 'Drag and drop a Word document here, or click to select'}
-        </Typography>
+        {uploading ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+            <CircularProgress 
+              size={40} 
+              sx={{
+                color: 'primary.main',
+                filter: 'drop-shadow(0 2px 4px rgba(0, 51, 102, 0.1))',
+              }}
+            />
+            <Typography variant="body1" color="text.secondary">
+              Uploading document...
+            </Typography>
+          </Box>
+        ) : (
+          <>
+            <CloudUploadIcon 
+              sx={{ 
+                fontSize: { xs: 48, md: 64 }, 
+                color: 'primary.main', 
+                mb: 3,
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                transform: isDragActive ? 'scale(1.1) translateY(-4px)' : 'scale(1)',
+                filter: isDragActive ? 'drop-shadow(0 4px 8px rgba(0, 51, 102, 0.2))' : 'none',
+              }} 
+            />
+            <Typography 
+              variant="h4" 
+              gutterBottom
+              sx={{
+                transition: 'all 0.3s ease',
+                transform: isDragActive ? 'translateY(-4px)' : 'none',
+              }}
+            >
+              {isDragActive ? 'Drop your document here' : 'Upload your NDA'}
+            </Typography>
+            <Typography 
+              variant="body1" 
+              color="text.secondary"
+              sx={{
+                transition: 'all 0.3s ease',
+                transform: isDragActive ? 'translateY(-4px)' : 'none',
+              }}
+            >
+              {isDragActive
+                ? 'Release to upload your document'
+                : 'Drag and drop a Word document here, or click to select'}
+            </Typography>
+          </>
+        )}
       </Paper>
 
-      {uploading && (
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
-          <CircularProgress />
-        </Box>
-      )}
-
-      {error && (
-        <Alert severity="error" sx={{ mt: 2 }}>
+      <Fade in={!!error}>
+        <Alert 
+          severity="error" 
+          sx={{ 
+            mt: 1.5,
+            borderRadius: 2,
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+          }}
+        >
           {error}
         </Alert>
-      )}
+      </Fade>
 
-      {success && (
-        <Alert severity="success" sx={{ mt: 2 }}>
+      <Fade in={!!success}>
+        <Alert 
+          severity="success" 
+          sx={{ 
+            mt: 1.5,
+            borderRadius: 2,
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+          }}
+        >
           {success}
         </Alert>
-      )}
+      </Fade>
 
-      {documentStatus?.status === 'completed' && (
-        <Stack direction="row" spacing={2} sx={{ mt: 2, justifyContent: 'center' }}>
+      <Fade in={documentStatus?.status === 'completed'}>
+        <Stack 
+          direction={{ xs: 'column', sm: 'row' }} 
+          spacing={2} 
+          sx={{ 
+            mt: 1.5,
+            justifyContent: 'center',
+            '& .MuiButton-root': {
+              minWidth: { xs: '100%', sm: 200 },
+              height: 48,
+            },
+          }}
+        >
           <Button
             variant="contained"
             startIcon={<DownloadIcon />}
             onClick={() => handleDownload('redline')}
+            sx={{
+              bgcolor: 'primary.main',
+              '&:hover': {
+                bgcolor: 'primary.dark',
+              },
+            }}
           >
             Download Redline Version
           </Button>
-          {!documentStatus.clean_path ? (
+          {!documentStatus?.clean_path ? (
             <Button
               variant="outlined"
               startIcon={<EditIcon />}
               onClick={handleGenerateClean}
               disabled={generatingClean}
+              sx={{
+                borderColor: 'primary.main',
+                color: 'primary.main',
+                '&:hover': {
+                  borderColor: 'primary.dark',
+                  bgcolor: 'primary.light',
+                  color: 'white',
+                },
+              }}
             >
               {generatingClean ? 'Generating...' : 'Generate Clean Version'}
             </Button>
@@ -210,12 +283,18 @@ const DocumentUpload: React.FC = () => {
               variant="contained"
               startIcon={<DownloadIcon />}
               onClick={() => handleDownload('clean')}
+              sx={{
+                bgcolor: 'secondary.main',
+                '&:hover': {
+                  bgcolor: 'secondary.dark',
+                },
+              }}
             >
               Download Clean Version
             </Button>
           )}
         </Stack>
-      )}
+      </Fade>
     </Box>
   );
 };
