@@ -1,5 +1,5 @@
 import React from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Container, Box, Typography } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, Container, Box, Typography, Avatar } from '@mui/material';
 import DocumentUpload from './components/DocumentUpload';
 
 // Create a theme instance with Huber + Suhner colors
@@ -21,7 +21,7 @@ const theme = createTheme({
     },
   },
   typography: {
-    fontFamily: '"Helvetica Neue", Arial, sans-serif',
+    fontFamily: '"Roboto", "Helvetica Neue", Arial, sans-serif',
     h1: {
       fontSize: '2.75rem',
       fontWeight: 700,
@@ -114,18 +114,35 @@ function App() {
               px: { xs: 2, md: 0 },
             }}
           >
-            <Typography 
-              variant="h1" 
-              gutterBottom
+            <Box
               sx={{
-                background: 'linear-gradient(135deg, #003366 0%, #0066cc 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                mb: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 3,
+                mb: 3,
               }}
             >
-              NDA Validator
-            </Typography>
+              <Avatar
+                src="/huber-suhner-ag-logo-talendo.jpg"
+                alt="Huber + Suhner Logo"
+                sx={{
+                  width: 120,
+                  height: 'auto',
+                }}
+              />
+              <Typography 
+                variant="h1" 
+                sx={{
+                  background: 'linear-gradient(135deg, #003366 0%, #0066cc 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  m: 0,
+                }}
+              >
+                NDA Validator
+              </Typography>
+            </Box>
             <Typography 
               variant="body1" 
               color="text.secondary" 
@@ -135,7 +152,7 @@ function App() {
                 opacity: 0.9,
               }}
             >
-              Validate your Non-Disclosure Agreements against Huber + Sühner's requirements
+              Validate your Non-Disclosure Agreements against Huber + Suhner's requirements
             </Typography>
           </Box>
           <DocumentUpload />
